@@ -13,7 +13,7 @@
          terminate/2,
          code_change/3]).
 
--record(state, {key, lsock, socket, remote}).
+-record(state, {encrState, decrState, lsock, socket, remote}).
 
 -include("../../common/socks_type.hrl").
 
@@ -52,7 +52,14 @@ start_link(LSock) ->
 %%--------------------------------------------------------------------
 init([LSock]) ->
     {ok, Key} = application:get_env(make_proxy_server, key),
-    {ok, #state{key=Key, lsock=LSock}, 0}.
+    {EncrState, DecrState} =
+        case application:get_env(make_proxy_client, iv) of
+            {ok, IV} ->
+                {mp_crypto:init(Key, IV), mp_crypto:init(Key, IV)};
+            _ ->
+                {mp_crypto:init(Key), mp_crypto:init(Key)}
+        end,
+    {ok, #state{encrState=EncrState, decrState=DecrState, lsock=LSock}, 0}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -99,14 +106,14 @@ handle_cast(_Msg, State) ->
 %%--------------------------------------------------------------------
 
 %% the first message send to this child
-handle_info(timeout, #state{key=Key, lsock=LSock, socket=undefined} = State) ->
+handle_info(timeout, #state{decrState=DecrState, lsock=LSock, socket=undefined} = State) ->
     {ok, Socket} = gen_tcp:accept(LSock),
     mp_sup:start_child(),
-    case connect_to_remote(Socket, Key) of
-        {ok, Remote} ->
+    case connect_to_remote(Socket, DecrState) of
+        {ok, Remote, NewDecrState} ->
             inet:setopts(Socket, [{active, once}]),
             inet:setopts(Remote, [{active, once}]),
-            {noreply, State#state{socket=Socket, remote=Remote}, ?TIMEOUT};
+            {noreply, State#state{decrState=NewDecrState, socket=Socket, remote=Remote}, ?TIMEOUT};
         {error, Error} ->
             {stop, Error, State}
     end;
@@ -116,22 +123,23 @@ handle_info(timeout, #state{socket=Socket} = State) when is_port(Socket) ->
     {stop, timeout, State};
 
 %% recv from client, and send to server
-handle_info({tcp, Socket, Request}, #state{key=Key, socket=Socket, remote=Remote} = State) ->
-    {ok, RealData} = mp_crypto:decrypt(Key, Request),
+handle_info({tcp, Socket, Request}, #state{decrState=DecrState, socket=Socket, remote=Remote} = State) ->
+    {NewDecrState, RealData} = mp_crypto:decrypt(DecrState, Request),
     case gen_tcp:send(Remote, RealData) of
         ok ->
             inet:setopts(Socket, [{active, once}]),
-            {noreply, State, ?TIMEOUT};
+            {noreply, State#state{decrState=NewDecrState}, ?TIMEOUT};
         {error, Error} ->
             {stop, Error, State}
     end;
 
 %% recv from server, and send back to client
-handle_info({tcp, Socket, Response}, #state{key=Key, socket=Client, remote=Socket} = State) ->
-    case gen_tcp:send(Client, mp_crypto:encrypt(Key, Response)) of
+handle_info({tcp, Socket, Response}, #state{encrState=EncrState, socket=Client, remote=Socket} = State) ->
+    {NewEncrState, EncrResponse} = mp_crypto:encrypt(EncrState, Response),
+    case gen_tcp:send(Client, EncrResponse) of
         ok ->
             inet:setopts(Socket, [{active, once}]),
-            {noreply, State, ?TIMEOUT};
+            {noreply, State#state{encrState=NewEncrState}, ?TIMEOUT};
         {error, Error} ->
             {stop, Error, State}
     end;
@@ -182,14 +190,17 @@ code_change(_OldVsn, State, _Extra) ->
 
 -spec connect_to_remote(port(), nonempty_string()) -> {ok, {list()|tuple(), non_neg_integer()}} |
                                                       {error, term()}.
-connect_to_remote(Socket, Key) ->
+connect_to_remote(Socket, DecrState) ->
     {ok, EntrypedData} = gen_tcp:recv(Socket, 0),
 
-    case mp_crypto:decrypt(Key, EntrypedData) of
-        {ok, RealData} ->
+    case mp_crypto:decrypt(DecrState, EntrypedData) of
+        {NewDecrState, RealData} ->
             <<AType:8, Rest/binary>> = RealData,
             {ok, {Address, Port}} = parse_address(AType, Rest),
-            connect_target(Address, Port);
+            case connect_target(Address, Port) of
+                {ok, Remote} -> {ok, Remote, NewDecrState};
+                Error -> Error
+            end;
         {error, Error} ->
             {error, Error}
     end.

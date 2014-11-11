@@ -7,17 +7,17 @@
 -define(DATALENGTH, 16).
 -define(IV, <<"90de3456asxdfrtg">>).
 
--spec init(iodata()) -> opaque().
+-spec init(iodata()) -> _State.
 init(AESKey) -> init(AESKey, ?IV).
 
--spec init(iodata(), binary()) -> opaque().
+-spec init(iodata(), binary()) -> _State.
 init(AESKey, AESIV) -> crypto:stream_init(aes_ctr, AESKey, AESIV).
 
--spec encrypt(opaque(), binary()) -> {State, binary()}.
+-spec encrypt(_State, binary()) -> {_NewState, binary()}.
 encrypt(CryptoState, Binary) -> crypto:stream_encrypt(CryptoState, Binary).
 
 
--spec encrypt(opaque(), binary()) -> {State, binary()}.
+-spec decrypt(_State, binary()) -> {_NewState, binary()}.
 decrypt(CryptoState, Binary) -> crypto:stream_decrypt(CryptoState, Binary).
 
 

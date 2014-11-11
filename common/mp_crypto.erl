@@ -5,7 +5,7 @@
          decrypt/2]).
 
 -define(DATALENGTH, 16).
--define(IV, <<"90de3456asxdfrtg">>).
+-define(IV, <<244,44,249,237,76,188,198,195,66,97,184,212,28,112,40,244>>).
 
 -spec init(iodata()) -> _State.
 init(AESKey) -> init(AESKey, ?IV).

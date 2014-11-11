@@ -1,30 +1,23 @@
 -module(mp_crypto).
--export([encrypt/2,
+-export([init/1,
+         init/2,
+         encrypt/2,
          decrypt/2]).
 
 -define(DATALENGTH, 16).
 -define(IV, <<"90de3456asxdfrtg">>).
 
--spec encrypt(nonempty_string(), binary()) -> <<_:_*8>>.
-encrypt(Key, Binary) ->
-    BinaryLength = byte_size(Binary),
-    Rem = (BinaryLength + 4) rem ?DATALENGTH,
-    AdditionalLength = ?DATALENGTH - Rem,
+-spec init(iodata()) -> opaque().
+init(AESKey) -> init(AESKey, ?IV).
 
-    FinalBinary = <<BinaryLength:32/integer-big, Binary/binary, 0:AdditionalLength/unit:8>>,
+-spec init(iodata(), binary()) -> opaque().
+init(AESKey, AESIV) -> crypto:stream_init(aes_ctr, AESKey, AESIV).
 
-    crypto:block_encrypt(aes_cbc128, Key, ?IV, FinalBinary).
+-spec encrypt(opaque(), binary()) -> {State, binary()}.
+encrypt(CryptoState, Binary) -> crypto:stream_encrypt(CryptoState, Binary).
 
 
--spec decrypt(nonempty_string(), <<_:_*8>>) -> {ok, binary()} |
-                                               {error, term()}.
-decrypt(Key, Binary) ->
-    Data = crypto:block_decrypt(aes_cbc128, Key, ?IV, Binary),
-    try
-        <<Length:32/integer-big, RealData:Length/binary, _Rest/binary>> = Data,
-        {ok, RealData}
-    catch
-        Error:Reason ->
-            {error, {Error, Reason}}
-    end.
+-spec encrypt(opaque(), binary()) -> {State, binary()}.
+decrypt(CryptoState, Binary) -> crypto:stream_decrypt(CryptoState, Binary).
+
 
